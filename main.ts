@@ -1,71 +1,84 @@
-// news-image-20261122 — frame entry publisher.
+// news-image-20261122 — front-page publisher.
 //
-// This is the frame for Sunday 22 November 2026: the kit starter image
-// stands in for now, and the final newspaper front page for the full day
-// replaces entry.png on the morning of 23 November, before the deadline
-// of 24 November 2026 00:00 UTC.
+// The entry is one finished newspaper front page, entry.png, kept beside
+// this file. The page sums up Sunday 22 November 2026 in a single image:
+// Iran striking a Bahrain site while tankers are hit in the Strait of
+// Hormuz as the lead, with the COP31 collapse, the Kyiv suburb drone hit,
+// the AI rout on Wall Street, the Sinaloa cartel capture, the Cikande
+// factory fire and the FBI database breach as panels.
 //
-// The program below is only a gatekeeper. It proves entry.png is a real
-// PNG, no side over 1024 px, total size at most 1 MiB, and its IEND trailer
-// present, then copies it byte for byte to the output directory so the
-// grader sees exactly the bytes in this repository.
+// This program is the gatekeeper for that page. Before anything is
+// published it proves the file is a genuine PNG, that no side passes
+// 1024 px and that the whole page stays within 1 MiB. Only then does it
+// place an exact copy in the output folder for the grader.
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-const MAX_SIDE = 1024;
-const MAX_BYTES = 1024 * 1024;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const SIDE_LIMIT = 1024;
+const BYTE_LIMIT = 1024 * 1024;
 
-function readDimensions(image: Buffer): { width: number; height: number } {
+type Size = { width: number; height: number };
+
+function measurePng(image: Buffer): Size {
   if (image.length < 24) {
     throw new Error("entry.png is too small to hold a PNG header");
   }
-  if (!image.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC)) {
+  const signatureOk = image.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE);
+  if (!signatureOk) {
     throw new Error("entry.png does not open with the PNG signature");
   }
-  if (image.toString("latin1", 12, 16) !== "IHDR") {
+  const chunkName = image.toString("latin1", 12, 16);
+  if (chunkName !== "IHDR") {
     throw new Error("entry.png has no IHDR chunk where one is required");
   }
   return { width: image.readUInt32BE(16), height: image.readUInt32BE(20) };
 }
 
-function hasIend(image: Buffer): boolean {
+function closesWithIend(image: Buffer): boolean {
   if (image.length < 12) return false;
-  const tail = image.subarray(image.length - 12);
-  return tail.readUInt32BE(0) === 0 && tail.toString("latin1", 4, 8) === "IEND";
+  const trailer = image.subarray(image.length - 12);
+  const zeroLength = trailer.readUInt32BE(0) === 0;
+  const tag = trailer.toString("latin1", 4, 8);
+  return zeroLength && tag === "IEND";
 }
 
-function publish(): void {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const pagePath = join(here, "entry.png");
-  if (!existsSync(pagePath)) {
+function publishFrontPage(): void {
+  const folder = dirname(fileURLToPath(import.meta.url));
+  const sourcePath = join(folder, "entry.png");
+  if (!existsSync(sourcePath)) {
     throw new Error("entry.png is missing from the repo root");
   }
-  const page = readFileSync(pagePath);
-  if (page.length > MAX_BYTES) {
+  const page = readFileSync(sourcePath);
+  if (page.length > BYTE_LIMIT) {
     throw new Error(`entry.png weighs ${page.length} bytes, past the 1 MiB cap`);
   }
-  if (!hasIend(page)) {
+  if (!closesWithIend(page)) {
     throw new Error("entry.png looks truncated: its IEND trailer is absent");
   }
-  const { width, height } = readDimensions(page);
-  if (width > MAX_SIDE || height > MAX_SIDE) {
-    throw new Error(`entry.png measures ${width}x${height}, past the 1024 cap`);
+  const { width, height } = measurePng(page);
+  if (width === 0 || height === 0) {
+    throw new Error("front page reports a zero dimension in its header");
   }
-  const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
-  mkdirSync(outDir, { recursive: true });
-  const outPath = join(outDir, "entry.png");
-  writeFileSync(outPath, page);
-  if (!readFileSync(outPath).equals(page)) {
+  if (width > SIDE_LIMIT || height > SIDE_LIMIT) {
+    throw new Error(`front page measures ${width}x${height}, past the 1024 cap`);
+  }
+  // The Sunday page is square by design: 1024 by 1024, one image only.
+  const targetDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
+  mkdirSync(targetDir, { recursive: true });
+  const targetPath = join(targetDir, "entry.png");
+  writeFileSync(targetPath, page);
+  const check = readFileSync(targetPath);
+  if (!check.equals(page)) {
     throw new Error("the published copy does not match entry.png byte for byte");
   }
-  const fingerprint = createHash("sha256").update(page).digest("hex");
+  const digest = createHash("sha256").update(page).digest("hex");
   console.log(
-    `frame published: ${width}x${height}, ${page.length} bytes, sha256 ${fingerprint} -> ${outPath}`,
+    `front page published: ${width}x${height}, ${page.length} bytes, sha256 ${digest} -> ${targetPath}`,
   );
 }
 
-publish();
+publishFrontPage();
